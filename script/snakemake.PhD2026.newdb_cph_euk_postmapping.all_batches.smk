@@ -191,7 +191,9 @@ rule merge_sort_newdb:
         tmp_sorted="{params.tmp_sorted}"
 
         # Expand Snakemake's bam list into the file
-        printf '%s\n' {input.bams:q} > "${{bam_list}}"
+        # NOTE: no :q on {input.bams} – for a list, :q quotes the WHOLE list as one
+        # string (bam_list becomes 1 line and the 129-count check fails). Use plain join.
+        printf '%s\n' {input.bams} > "${{bam_list}}"
 
         actual=$(wc -l < "${{bam_list}}")
         if [[ "${{actual}}" -ne {params.expected_bams} ]]; then
