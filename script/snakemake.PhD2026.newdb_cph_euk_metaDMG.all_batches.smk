@@ -37,8 +37,6 @@ METADMG_TEMP   = os.path.join(PROJECT_BASE, "tmp/metaDMG_temp")
 # 你在 taxonomy_CPH 下 tree 所示：ncbi/20250530 为 wgs 专用
 NODES_ML      = "/home/database/ref20250728/taxonomy_CPH/ncbi/20250530/nodes.dmp"
 NAMES_ML      = "/home/database/ref20250728/taxonomy_CPH/ncbi/20250530/names.dmp"
-NODES_LAJIA   = "/home/database/ref20250728/taxonomy_CPH/ncbi/20250530/nodes.dmp"
-NAMES_LAJIA   = "/home/database/ref20250728/taxonomy_CPH/ncbi/20250530/names.dmp"
 
 # ---- acc2tax ----
 # 全部并入（wgs + cph_euk plastid/mito/corent + core_nt + refseq mito/plastid）
@@ -60,9 +58,8 @@ ACC2TAX_SOURCES = [
 # 放项目 tmp 下，保证 shenmj 有写权限（database 目录未必可写）
 MERGED_ACC2TAX           = os.path.join(PROJECT_BASE, "tmp/taxonomy_CPH/all.merged.acc2taxid")
 
-# 兼容旧变量名（lca rule 直接引用）
-ACC2TAX_ML    = MERGED_ACC2TAX
-ACC2TAX_LAJIA = MERGED_ACC2TAX
+# lca rule 引用的 acc2tax
+ACC2TAX_ML = MERGED_ACC2TAX
 
 # 新库 BAM 前缀（必须与 postmapping 输出一致）
 NEWDB_LABEL = "newdb_cph_euk"
@@ -87,11 +84,7 @@ for fq in sorted(glob.glob(os.path.join(PROCESSED_BASE, "*", "*", f"*{QC_SUFFIX}
     SAMPLES.append((bt, sm))
 SAMPLES = sorted(set(SAMPLES))
 
-# 拆分 ML vs Lajia（Lajia 无 lane，但也走 glob；按 batch 名区分）
-VALID_ML_SAMPLES = [(b, s) for b, s in SAMPLES if b != "Lajia_sites"]
-LAJIA_SAMPLES    = [s for b, s in SAMPLES if b == "Lajia_sites"]
-
-print(f"[INFO] NewDB metaDMG – total {len(SAMPLES)} | ML {len(VALID_ML_SAMPLES)} | Lajia {len(LAJIA_SAMPLES)}")
+print(f"[INFO] NewDB metaDMG – total {len(SAMPLES)} samples (Lajia batch handled via {{batch}}/{sample})")
 print(f"[INFO] NODES: {NODES_ML}")
 print(f"[INFO] MERGED_ACC2TAX: {MERGED_ACC2TAX}")
 print(f"[INFO]   acc2tax sources ({len(ACC2TAX_SOURCES)}):")
@@ -155,14 +148,12 @@ onstart:
 
 # ─────────────────────────────────────────────────────────
 # TARGET FILES
+# 统一用 {batch}/{sample} 通配符（Lajia 的 batch 即 "Lajia_sites"），
+# 不再拆分 ML / Lajia 两套规则，避免 AmbiguousRuleException。
 # ─────────────────────────────────────────────────────────
-ML_METADMG_TARGETS = [
+ALL_METADMG_TARGETS = [
     os.path.join(METADMG_BASE, batch, sample, f"{sample}.{NEWDB_LABEL}.metaDMG.aggregate.done")
-    for batch, sample in VALID_ML_SAMPLES
-]
-LAJIA_METADMG_TARGETS = [
-    os.path.join(METADMG_BASE, "Lajia_sites", sample, f"{sample}.{NEWDB_LABEL}.metaDMG.aggregate.done")
-    for sample in LAJIA_SAMPLES
+    for batch, sample in SAMPLES
 ]
 
 # ─────────────────────────────────────────────────────────
@@ -170,8 +161,6 @@ LAJIA_METADMG_TARGETS = [
 # ─────────────────────────────────────────────────────────
 wildcard_constraints:
     batch  = r"[^/]+",
-    sn     = r"[^_/]+",
-    snum   = r"S\d+",
     sample = r"[^/]+"
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -179,12 +168,13 @@ wildcard_constraints:
 # ═══════════════════════════════════════════════════════════════════════
 rule all:
     input:
-        ML_METADMG_TARGETS + LAJIA_METADMG_TARGETS
+        ALL_METADMG_TARGETS
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # MULTI-LANE metaDMG RULES – 参数完全沿用 snakemake.PhD2026.metaDMG.all_batches.smk
 # 输入 BAM 已改为 newdb_cph_euk.merged.sorted.bam
+# 统一 {batch}/{sample} 通配符（Lajia 的 batch 即 "Lajia_sites"），不拆分 ML/Lajia 规则
 # ═══════════════════════════════════════════════════════════════════════
 
 rule metaDMG_dmg_ml:
@@ -266,100 +256,6 @@ rule metaDMG_aggregate_ml:
         flag = METADMG_BASE + "/{batch}/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.aggregate.done"
     params:
         output_prefix = METADMG_BASE + "/{batch}/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.aggregate"
-    resources:
-        mem_mb = 40000,
-        nodes  = 1
-    threads: 40
-    shell:
-        """
-        metaDMG-cpp aggregate {input.bdamage} --dfit {input.dfit} --lcastat {input.lca_stat} --nodes {input.nodes} --names {input.names} --out {params.output_prefix}
-        touch {output.flag}
-        """
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# LAJIA metaDMG RULES
-# ═══════════════════════════════════════════════════════════════════════
-
-rule metaDMG_dmg_lajia:
-    input:
-        merge_sort_bam = BAM_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".merged.sorted.bam"
-    output:
-        flag = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.dmg.done"
-    params:
-        out_dir       = METADMG_BASE + "/Lajia_sites/{sample}/",
-        output_prefix = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.dmg"
-    resources:
-        mem_mb = 40000,
-        nodes  = 1
-    threads: 20
-    shell:
-        """
-        mkdir -p {params.out_dir}
-        metaDMG-cpp getdamage --run_mode 0 --print_length 15 --min_length 30 --out_prefix {params.output_prefix} {input.merge_sort_bam}
-        touch {output.flag}
-        """
-
-rule metaDMG_lca_lajia:
-    input:
-        merge_sort_bam = BAM_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".merged.sorted.bam",
-        nodes          = NODES_LAJIA,
-        names          = NAMES_LAJIA,
-        acc2tax        = ACC2TAX_LAJIA
-    output:
-        bdamage  = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.lca.bdamage.gz",
-        lca_stat = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.lca.stat.gz",
-        flag     = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.lca.done"
-    params:
-        temp_folder   = METADMG_TEMP + "/Lajia_sites/{sample}/",
-        output_prefix = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.lca"
-    resources:
-        mem_mb = 40000,
-        nodes  = 1
-    threads: 40
-    shell:
-        """
-        mkdir -p {params.temp_folder}
-        metaDMG-cpp lca --threads {threads} --bam {input.merge_sort_bam} --nodes {input.nodes} --names {input.names} \
-        --acc2tax {input.acc2tax} --fix_ncbi 0 --how_many 15 --sim_score_low 0.95 --weight_type 0 --lca_rank genus --temp {params.temp_folder} \
-         --out_prefix {params.output_prefix}
-        touch {output.flag}
-        """
-
-rule metaDMG_dfit_lajia:
-    input:
-        bdamage = rules.metaDMG_lca_lajia.output.bdamage,
-        nodes   = NODES_LAJIA,
-        names   = NAMES_LAJIA
-    output:
-        dfit = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.dfit.dfit.gz",
-        flag = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.dfit.done"
-    params:
-        output_prefix = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.dfit"
-    resources:
-        mem_mb = 40000,
-        nodes  = 1
-    threads: 40
-    shell:
-        """
-        metaDMG-cpp dfit {input.bdamage} --threads {threads} --nodes {input.nodes} --names {input.names} \
-        --nopt 5 --showfits 2 --seed 42 --out_prefix {params.output_prefix}
-        touch {output.flag}
-        """
-
-rule metaDMG_aggregate_lajia:
-    input:
-        rules.metaDMG_dmg_lajia.output.flag,
-        rules.metaDMG_dfit_lajia.output.flag,
-        lca_stat = rules.metaDMG_lca_lajia.output.lca_stat,
-        bdamage  = rules.metaDMG_lca_lajia.output.bdamage,
-        dfit     = rules.metaDMG_dfit_lajia.output.dfit,
-        nodes    = NODES_LAJIA,
-        names    = NAMES_LAJIA
-    output:
-        flag = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.aggregate.done"
-    params:
-        output_prefix = METADMG_BASE + "/Lajia_sites/{sample}/{sample}." + NEWDB_LABEL + ".metaDMG.aggregate"
     resources:
         mem_mb = 40000,
         nodes  = 1
