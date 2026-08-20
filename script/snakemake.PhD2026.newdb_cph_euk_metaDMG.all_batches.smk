@@ -84,7 +84,7 @@ for fq in sorted(glob.glob(os.path.join(PROCESSED_BASE, "*", "*", f"*{QC_SUFFIX}
     SAMPLES.append((bt, sm))
 SAMPLES = sorted(set(SAMPLES))
 
-print(f"[INFO] NewDB metaDMG – total {len(SAMPLES)} samples (Lajia batch handled via {{batch}}/{sample})")
+print(f"[INFO] NewDB metaDMG – total {len(SAMPLES)} samples (Lajia batch handled via batch/sample wildcards)")
 print(f"[INFO] NODES: {NODES_ML}")
 print(f"[INFO] MERGED_ACC2TAX: {MERGED_ACC2TAX}")
 print(f"[INFO]   acc2tax sources ({len(ACC2TAX_SOURCES)}):")
